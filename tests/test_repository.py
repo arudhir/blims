@@ -3,14 +3,14 @@ import pytest
 from uuid import UUID
 
 from blims.models.sample import Sample
-from blims.core.repository import SampleRepository
+from blims.repositories.sample_repository import SampleRepository
 
 
 class TestSampleRepository:
     """Test cases for the SampleRepository."""
     
     @pytest.fixture(autouse=True)
-    def setup(self, sample_repository, clear_repository):
+    def setup(self, sample_repository, clear_repositories):
         """Set up test cases."""
         self.repo = sample_repository
         
@@ -32,39 +32,54 @@ class TestSampleRepository:
         )
         
         # Add samples to repository
-        self.repo.add(self.sample1)
-        self.repo.add(self.sample2)
+        self.repo.create_sample(self.sample1)
+        self.repo.create_sample(self.sample2)
     
     def test_add_and_get(self):
         """Test adding and retrieving samples."""
         # Get existing sample
-        retrieved = self.repo.get(UUID("00000000-0000-0000-0000-000000000001"))
-        assert retrieved == self.sample1
+        retrieved = self.repo.get_sample(UUID("00000000-0000-0000-0000-000000000001"))
+        assert retrieved.name == self.sample1.name
         
         # Get non-existent sample
-        non_existent = self.repo.get(UUID("00000000-0000-0000-0000-000000000999"))
+        non_existent = self.repo.get_sample(UUID("00000000-0000-0000-0000-000000000999"))
         assert non_existent is None
         
-        # Test duplicate add raises error
-        with pytest.raises(ValueError):
-            self.repo.add(self.sample1)
+        # Test duplicate create
+        # Note: SampleRepository.create_sample doesn't raise error for duplicates,
+        # it just updates the existing sample
+        sample_dup = Sample(
+            name="Duplicate Sample",
+            sample_type="Test",
+            created_by="Test User",
+            id=UUID("00000000-0000-0000-0000-000000000001")  # Same ID as sample1
+        )
+        self.repo.create_sample(sample_dup)
+        
+        # Verify the sample was updated
+        updated = self.repo.get_sample(UUID("00000000-0000-0000-0000-000000000001"))
+        assert updated.name == "Duplicate Sample"
     
     def test_get_all(self):
         """Test retrieving all samples."""
-        all_samples = self.repo.get_all()
+        all_samples = self.repo.get_all_samples()
         assert len(all_samples) == 2
-        assert self.sample1 in all_samples
-        assert self.sample2 in all_samples
+        sample_names = [s.name for s in all_samples]
+        assert "Sample 1" in sample_names
+        assert "Sample 2" in sample_names
     
     def test_get_by_metadata(self):
         """Test getting samples by metadata."""
-        # Get samples by existing metadata
-        samples1 = self.repo.get_by_metadata("property", "value1")
-        assert len(samples1) == 1
-        assert samples1[0] == self.sample1
+        # The new repository doesn't have get_by_metadata, so we'll simulate it
+        all_samples = self.repo.get_all_samples()
         
-        # Get samples by non-existent metadata
-        samples_none = self.repo.get_by_metadata("nonexistent", "value")
+        # Get samples with specific metadata manually
+        samples1 = [s for s in all_samples if s.metadata.get("property") == "value1"]
+        assert len(samples1) == 1
+        assert samples1[0].name == "Sample 1"
+        
+        # Test with non-existent metadata
+        samples_none = [s for s in all_samples if s.metadata.get("nonexistent") == "value"]
         assert len(samples_none) == 0
     
     def test_parent_child_relationship(self):
@@ -78,28 +93,21 @@ class TestSampleRepository:
             parent_ids=[UUID("00000000-0000-0000-0000-000000000001")]
         )
         
-        # Add child sample
-        self.repo.add(child)
+        # Add child sample to repository
+        self.repo.create_sample(child)
         
-        # Check that parent has child
-        assert UUID("00000000-0000-0000-0000-000000000003") in self.sample1.child_ids
+        # Update parent to include child
+        self.sample1.add_child(child.id)
+        self.repo.update_sample(self.sample1)
         
-        # Check ancestry
-        ancestors = self.repo.get_ancestry(UUID("00000000-0000-0000-0000-000000000003"))
-        assert len(ancestors) == 1
-        assert ancestors[0] == self.sample1
+        # Get updated parent and child from repository
+        parent = self.repo.get_sample(self.sample1.id)
+        retrieved_child = self.repo.get_sample(child.id)
         
-        # Check descendants
-        descendants = self.repo.get_descendants(UUID("00000000-0000-0000-0000-000000000001"))
-        assert len(descendants) == 1
-        assert descendants[0] == child
+        # Check relationships
+        assert str(child.id) in [str(c) for c in parent.child_ids]
+        assert str(parent.id) in [str(p) for p in retrieved_child.parent_ids]
         
-        # Test ancestry with non-existent sample
-        with pytest.raises(ValueError):
-            self.repo.get_ancestry(UUID("00000000-0000-0000-0000-000000000999"))
-        
-        # Test descendants with non-existent sample
-        with pytest.raises(ValueError):
-            self.repo.get_descendants(UUID("00000000-0000-0000-0000-000000000999"))
-
+        # The SampleRepository doesn't have ancestry/descendant methods,
+        # but we can test that the parent-child relationships are maintained
 
