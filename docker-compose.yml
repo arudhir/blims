@@ -1,0 +1,58 @@
+version: '3.8'
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./:/app
+      # Don't mount over the installed dependencies
+      - /app/venv/
+    environment:
+      - ENVIRONMENT=development
+    restart: unless-stopped
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+    networks:
+      - blims-network
+
+  ui:
+    build:
+      context: .
+      dockerfile: Dockerfile.streamlit
+    ports:
+      - "8501:8501"
+    volumes:
+      - ./:/app
+      # Don't mount over the installed dependencies
+      - /app/venv/
+    environment:
+      - ENVIRONMENT=development
+    restart: unless-stopped
+    depends_on:
+      - api
+    networks:
+      - blims-network
+
+  # For future use with a database
+  # db:
+  #   image: postgres:14
+  #   ports:
+  #     - "5432:5432"
+  #   environment:
+  #     - POSTGRES_USER=blims
+  #     - POSTGRES_PASSWORD=blims
+  #     - POSTGRES_DB=blims
+  #   volumes:
+  #     - blims-db:/var/lib/postgresql/data
+  #   networks:
+  #     - blims-network
+
+networks:
+  blims-network:
+    driver: bridge
+
+# volumes:
+#   blims-db:

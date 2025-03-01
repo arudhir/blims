@@ -1,0 +1,311 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'BLIMS - Bioinformatics Laboratory Information Management System Infrastructure'
+
+Parameters:
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues:
+      - dev
+      - staging
+      - prod
+    Description: Deployment environment
+    
+  BucketNamePrefix:
+    Type: String
+    Default: blims
+    Description: Prefix for S3 bucket names
+    
+  DynamoDBTableName:
+    Type: String
+    Default: blims-samples
+    Description: Name for the DynamoDB table to store sample information
+    
+  BatchComputeEnvironmentName:
+    Type: String
+    Default: blims-compute-env
+    Description: Name for the AWS Batch compute environment
+    
+  BatchJobQueueName:
+    Type: String
+    Default: blims-job-queue
+    Description: Name for the AWS Batch job queue
+
+Resources:
+  # S3 bucket for bioinformatics data
+  BioinformaticsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "${BucketNamePrefix}-bioinformatics-${Environment}"
+      VersioningConfiguration:
+        Status: Enabled
+      LifecycleConfiguration:
+        Rules:
+          - Id: TransitionToInfrequentAccess
+            Status: Enabled
+            Transitions:
+              - TransitionInDays: 90
+                StorageClass: STANDARD_IA
+      CorsConfiguration:
+        CorsRules:
+          - AllowedHeaders:
+              - '*'
+            AllowedMethods:
+              - GET
+              - PUT
+              - POST
+              - DELETE
+              - HEAD
+            AllowedOrigins:
+              - '*'
+            MaxAge: 3000
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Project
+          Value: BLIMS
+  
+  # S3 bucket for application data (like frontend assets, config, etc.)
+  AppBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "${BucketNamePrefix}-app-${Environment}"
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Project
+          Value: BLIMS
+  
+  # DynamoDB table for sample information
+  SamplesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Ref DynamoDBTableName
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: sample_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: sample_id
+          KeyType: HASH
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Project
+          Value: BLIMS
+  
+  # IAM Role for Batch service
+  BatchServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: batch.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSBatchServiceRole
+  
+  # IAM Role for EC2 instances in the Batch compute environment
+  BatchInstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+        - arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess
+  
+  # Instance profile for EC2 instances
+  BatchInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref BatchInstanceRole
+  
+  # IAM Role for ECS tasks (for job definitions)
+  BatchJobRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonS3FullAccess
+      Policies:
+        - PolicyName: BlimsJobPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:ListBucket
+                Resource:
+                  - !GetAtt BioinformaticsBucket.Arn
+                  - !Sub "${BioinformaticsBucket.Arn}/*"
+  
+  # AWS Batch Compute Environment
+  BatchComputeEnvironment:
+    Type: AWS::Batch::ComputeEnvironment
+    Properties:
+      ComputeEnvironmentName: !Ref BatchComputeEnvironmentName
+      Type: MANAGED
+      State: ENABLED
+      ServiceRole: !GetAtt BatchServiceRole.Arn
+      ComputeResources:
+        Type: EC2
+        AllocationStrategy: BEST_FIT_PROGRESSIVE
+        MinvCpus: 0
+        MaxvCpus: 16
+        DesiredvCpus: 0
+        InstanceTypes:
+          - c5
+          - m5
+        Subnets:
+          - !ImportValue "DefaultSubnet1"
+        SecurityGroupIds:
+          - !ImportValue "DefaultSecurityGroup"
+        InstanceRole: !GetAtt BatchInstanceProfile.Arn
+        Tags:
+          Environment: !Ref Environment
+          Project: BLIMS
+  
+  # AWS Batch Job Queue
+  BatchJobQueue:
+    Type: AWS::Batch::JobQueue
+    Properties:
+      JobQueueName: !Ref BatchJobQueueName
+      Priority: 1
+      State: ENABLED
+      ComputeEnvironmentOrder:
+        - Order: 1
+          ComputeEnvironment: !Ref BatchComputeEnvironment
+  
+  # Job Definitions for common bioinformatics tools
+  
+  # FastQC
+  FastQCJobDefinition:
+    Type: AWS::Batch::JobDefinition
+    Properties:
+      JobDefinitionName: !Sub "blims-fastqc-${Environment}"
+      Type: container
+      ContainerProperties:
+        Image: quay.io/biocontainers/fastqc:0.11.9--0
+        Command:
+          - fastqc
+          - Ref::input_file
+          - -o
+          - Ref::output_dir
+        Volumes:
+          - Name: tmp
+            Host:
+              SourcePath: /tmp
+        MountPoints:
+          - ContainerPath: /tmp
+            ReadOnly: false
+            SourceVolume: tmp
+        ResourceRequirements:
+          - Type: VCPU
+            Value: "2"
+          - Type: MEMORY
+            Value: "4096"
+        JobRoleArn: !GetAtt BatchJobRole.Arn
+      RetryStrategy:
+        Attempts: 2
+      Tags:
+        Environment: !Ref Environment
+        Project: BLIMS
+  
+  # BWA-MEM alignment
+  BwaMemJobDefinition:
+    Type: AWS::Batch::JobDefinition
+    Properties:
+      JobDefinitionName: !Sub "blims-bwa-mem-${Environment}"
+      Type: container
+      ContainerProperties:
+        Image: quay.io/biocontainers/bwa:0.7.17--h7132678_9
+        Command:
+          - bwa
+          - mem
+          - -t
+          - "4"
+          - Ref::reference
+          - Ref::reads1
+          - Ref::reads2
+          - "|"
+          - "samtools"
+          - "view"
+          - "-Sb"
+          - "-"
+          - ">"
+          - Ref::output_bam
+        Volumes:
+          - Name: tmp
+            Host:
+              SourcePath: /tmp
+        MountPoints:
+          - ContainerPath: /tmp
+            ReadOnly: false
+            SourceVolume: tmp
+        ResourceRequirements:
+          - Type: VCPU
+            Value: "4"
+          - Type: MEMORY
+            Value: "8192"
+        JobRoleArn: !GetAtt BatchJobRole.Arn
+      RetryStrategy:
+        Attempts: 2
+      Tags:
+        Environment: !Ref Environment
+        Project: BLIMS
+
+# Output values that will be needed by the application
+Outputs:
+  BioinformaticsBucketName:
+    Description: Name of the S3 bucket for bioinformatics data
+    Value: !Ref BioinformaticsBucket
+    Export:
+      Name: !Sub "${AWS::StackName}-BioinformaticsBucket"
+  
+  AppBucketName:
+    Description: Name of the S3 bucket for application data
+    Value: !Ref AppBucket
+    Export:
+      Name: !Sub "${AWS::StackName}-AppBucket"
+  
+  SamplesTableName:
+    Description: Name of the DynamoDB table for samples
+    Value: !Ref SamplesTable
+    Export:
+      Name: !Sub "${AWS::StackName}-SamplesTable"
+  
+  BatchJobQueueName:
+    Description: Name of the AWS Batch job queue
+    Value: !Ref BatchJobQueue
+    Export:
+      Name: !Sub "${AWS::StackName}-JobQueue"
+  
+  FastQCJobDefinitionArn:
+    Description: ARN of the FastQC job definition
+    Value: !Ref FastQCJobDefinition
+    Export:
+      Name: !Sub "${AWS::StackName}-FastQCJobDefinition"
+  
+  BwaMemJobDefinitionArn:
+    Description: ARN of the BWA-MEM job definition
+    Value: !Ref BwaMemJobDefinition
+    Export:
+      Name: !Sub "${AWS::StackName}-BwaMemJobDefinition"
