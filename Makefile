@@ -1,4 +1,4 @@
-.PHONY: setup clean lint test coverage run dev format check reformat docker-build docker-up docker-down docker-logs docker-shell help test-data
+.PHONY: setup clean lint test coverage run dev format check reformat docker-build docker-up docker-down docker-logs docker-shell help test-data aws aws-validate aws-deploy
 
 # Default target
 help:
@@ -17,6 +17,12 @@ help:
 	@echo "  dev          - Run the application in development mode with auto-reload"
 	@echo "  dev-setup    - Set up development environment with additional tools"
 	@echo "  install-hooks - Install git pre-commit hooks"
+	@echo "  test-data    - Create test data for development"
+	@echo ""
+	@echo "AWS commands:"
+	@echo "  aws          - Interactive AWS deployment menu"
+	@echo "  aws-validate - Validate AWS CloudFormation templates"
+	@echo "  aws-deploy   - Deploy AWS infrastructure"
 	@echo ""
 	@echo "Docker commands:"
 	@echo "  docker-build - Build the Docker image"
