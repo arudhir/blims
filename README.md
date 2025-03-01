@@ -43,17 +43,26 @@ make docker-dev
   - Support for sample barcodes
   - Container organization (plates, boxes, racks)
   - Parent-child relationships for derived samples
+  - Associate samples with reference genomes
 
 - **Data Visualization**
   - Interactive sample network visualization
   - Container hierarchy views
   - Sample lineage tracking
 
+- **Genomics Infrastructure**
+  - Reference genome management with FASTA file support
+  - Genomic feature tracking (genes, exons, variants, etc.)
+  - Positional genomic data with chromosome and coordinate support
+  - Hierarchical feature relationships (genes → exons)
+  - Region-based feature queries
+
 - **Bioinformatics Integration**
   - Sequencing data management
   - Analysis job submission to AWS Batch
   - Analysis results tracking and viewing
   - Support for common bioinformatics file formats
+  - Complete RNA-Seq pipeline with automated processing stages
 
 ## Development Notes
 
@@ -65,9 +74,14 @@ blims/
 ├── blims/          # Core package
 │   ├── api/        # API implementation
 │   ├── core/       # Business logic
-│   ├── models/     # Data models
+│   ├── models/     # Data models (Sample, Genome, Feature, etc.)
+│   ├── repositories/ # Data access layer
+│   ├── services/   # Service layer with business logic
 │   └── utils/      # Utilities
 ├── aws/            # AWS infrastructure
+│   ├── batch/      # AWS Batch job definitions
+│   ├── containers/ # Docker containers for pipeline stages
+│   └── cfn/        # CloudFormation templates
 ├── tests/          # Test suite
 ├── streamlit_app.py # Streamlit UI
 └── main.py         # FastAPI application
@@ -119,6 +133,7 @@ When you deploy BLIMS to AWS, the following resources are created:
    - VPC with public and private subnets in 2 availability zones
    - NAT Gateway for outbound internet access
    - Security groups for service access
+   - Route tables configured for proper network isolation
 
 2. **Storage**
    - S3 bucket for bioinformatics data (`blims-bioinformatics-{env}`)
@@ -129,6 +144,13 @@ When you deploy BLIMS to AWS, the following resources are created:
    - AWS Batch compute environment with auto-scaling EC2 instances
    - AWS Batch job queue for bioinformatics job submission
    - Job definitions for common bioinformatics tools (FastQC, BWA-MEM)
+   - Complete RNA-Seq pipeline with 6 processing stages:
+     - Read processing (SRA tools, fastp, BBDuk)
+     - Read normalization (BBNorm)
+     - Transcript quantification (Salmon)
+     - RNA assembly (SPAdes)
+     - Annotation (TransDecoder, eggNOG)
+     - Database integration (DuckDB)
 
 4. **Security**
    - IAM roles with least-privilege permissions
@@ -187,4 +209,4 @@ The AWS resources created by BLIMS have the following estimated costs:
 
 ## Contact
 
-For questions or support, please open an issue on the GitHub repository.# blims
+For questions or support, please open an issue on the GitHub repository.
