@@ -1,0 +1,69 @@
+FROM --platform=linux/amd64 ubuntu:20.04
+
+# Set environment variables
+ENV TOOLS=/tools
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PATH=$PATH:$TOOLS/bin:/usr/local/bin
+
+# Install common system dependencies
+RUN apt-get update && apt-get install -y \
+    autotools-dev \
+    automake \
+    cmake \
+    curl \
+    git \
+    libbz2-dev \
+    libdatetime-perl \
+    libdigest-md5-perl \
+    liblzma-dev \
+    libncurses5-dev \
+    libncursesw5-dev \
+    libxml-simple-perl \
+    openjdk-11-jre-headless \
+    parallel \
+    pigz \
+    python3 \
+    python3-pip \
+    python-is-python3 \
+    python3-venv \
+    wget \
+    unzip \
+    zlib1g-dev \
+    awscli \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create tools directory
+RUN mkdir -p ${TOOLS}/bin
+
+# Install seqtk (common utility for all jobs)
+WORKDIR ${TOOLS}
+RUN git clone https://github.com/lh3/seqtk.git \
+    && cd seqtk \
+    && make \
+    && cp seqtk ${TOOLS}/bin/
+
+# Install seqkit (common utility for all jobs)
+WORKDIR ${TOOLS}
+RUN wget https://github.com/shenwei356/seqkit/releases/download/v2.9.0/seqkit_linux_amd64.tar.gz \
+    && tar xvf seqkit_linux_amd64.tar.gz \
+    && cp seqkit ${TOOLS}/bin/ \
+    && rm seqkit_linux_amd64.tar.gz
+
+# Install Salmon
+WORKDIR ${TOOLS}
+RUN wget https://github.com/COMBINE-lab/salmon/releases/download/v1.10.1/salmon-1.10.1_linux_x86_64.tar.gz \
+    && tar xvf salmon-1.10.1_linux_x86_64.tar.gz \
+    && ln -s ${TOOLS}/salmon-1.10.1_linux_x86_64/bin/* ${TOOLS}/bin/ \
+    && rm salmon-1.10.1_linux_x86_64.tar.gz
+
+# Create working directory
+RUN mkdir -p /data
+WORKDIR /data
+
+# Add quantification script
+COPY quantify_reads.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/quantify_reads.sh
+
+# Set default command
+ENTRYPOINT ["/usr/local/bin/quantify_reads.sh"]

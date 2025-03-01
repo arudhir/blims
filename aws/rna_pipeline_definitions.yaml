@@ -1,0 +1,346 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'BLIMS - RNA-Seq Pipeline Job Definitions'
+
+Parameters:
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues:
+      - dev
+      - staging
+      - prod
+    Description: Deployment environment
+
+  JobRoleArn:
+    Type: String
+    Description: ARN of the IAM role for batch jobs
+    
+Resources:
+  # 1. Read Processing Job (fastq-dump, pigz compression, fastp, bbduk)
+  ReadProcessingJobDefinition:
+    Type: AWS::Batch::JobDefinition
+    Properties:
+      JobDefinitionName: !Sub "blims-rna-read-processing-${Environment}"
+      Type: container
+      ContainerProperties:
+        Image: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/blims-rna-pipeline:read-processing-latest"
+        Command:
+          - "/bin/bash"
+          - "-c"
+          - Ref::command
+        Environment:
+          - Name: SRA_ACCESSION
+            Value: Ref::sra_accession
+          - Name: OUTPUT_PREFIX
+            Value: Ref::output_prefix
+          - Name: S3_REFERENCE_BUCKET
+            Value: Ref::reference_bucket
+          - Name: RRNA_REFERENCE
+            Value: Ref::rrna_reference
+          - Name: OUTPUT_BUCKET
+            Value: Ref::output_bucket
+          - Name: OUTPUT_PREFIX
+            Value: Ref::output_prefix
+          - Name: THREADS
+            Value: "8"
+        Volumes:
+          - Name: workdir
+            Host:
+              SourcePath: /tmp/blims-workdir
+        MountPoints:
+          - ContainerPath: /data
+            ReadOnly: false
+            SourceVolume: workdir
+        ResourceRequirements:
+          - Type: VCPU
+            Value: "8"
+          - Type: MEMORY
+            Value: "16384"
+        JobRoleArn: !Ref JobRoleArn
+      RetryStrategy:
+        Attempts: 2
+      Tags:
+        Environment: !Ref Environment
+        Project: BLIMS
+        Component: RNA-Seq-Pipeline
+
+  # 2. Normalization Job (bbnorm)
+  NormalizationJobDefinition:
+    Type: AWS::Batch::JobDefinition
+    Properties:
+      JobDefinitionName: !Sub "blims-rna-normalization-${Environment}"
+      Type: container
+      ContainerProperties:
+        Image: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/blims-rna-pipeline:normalization-latest"
+        Command:
+          - "/bin/bash"
+          - "-c"
+          - Ref::command
+        Environment:
+          - Name: INPUT_BUCKET
+            Value: Ref::input_bucket
+          - Name: INPUT_PREFIX
+            Value: Ref::input_prefix
+          - Name: OUTPUT_BUCKET
+            Value: Ref::output_bucket
+          - Name: OUTPUT_PREFIX
+            Value: Ref::output_prefix
+          - Name: TARGET_DEPTH
+            Value: Ref::target_depth
+          - Name: MIN_DEPTH
+            Value: Ref::min_depth
+          - Name: THREADS
+            Value: "8"
+        Volumes:
+          - Name: workdir
+            Host:
+              SourcePath: /tmp/blims-workdir
+        MountPoints:
+          - ContainerPath: /data
+            ReadOnly: false
+            SourceVolume: workdir
+        ResourceRequirements:
+          - Type: VCPU
+            Value: "8"
+          - Type: MEMORY
+            Value: "32768"
+        JobRoleArn: !Ref JobRoleArn
+      RetryStrategy:
+        Attempts: 2
+      Tags:
+        Environment: !Ref Environment
+        Project: BLIMS
+        Component: RNA-Seq-Pipeline
+
+  # 3. Quantification Job (salmon)
+  QuantificationJobDefinition:
+    Type: AWS::Batch::JobDefinition
+    Properties:
+      JobDefinitionName: !Sub "blims-rna-quantification-${Environment}"
+      Type: container
+      ContainerProperties:
+        Image: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/blims-rna-pipeline:quantification-latest"
+        Command:
+          - "/bin/bash"
+          - "-c"
+          - Ref::command
+        Environment:
+          - Name: INPUT_BUCKET
+            Value: Ref::input_bucket
+          - Name: INPUT_PREFIX
+            Value: Ref::input_prefix
+          - Name: OUTPUT_BUCKET
+            Value: Ref::output_bucket
+          - Name: OUTPUT_PREFIX
+            Value: Ref::output_prefix
+          - Name: REFERENCE_BUCKET
+            Value: Ref::reference_bucket
+          - Name: REFERENCE_INDEX
+            Value: Ref::reference_index
+          - Name: THREADS
+            Value: "8"
+        Volumes:
+          - Name: workdir
+            Host:
+              SourcePath: /tmp/blims-workdir
+        MountPoints:
+          - ContainerPath: /data
+            ReadOnly: false
+            SourceVolume: workdir
+        ResourceRequirements:
+          - Type: VCPU
+            Value: "8"
+          - Type: MEMORY
+            Value: "16384"
+        JobRoleArn: !Ref JobRoleArn
+      RetryStrategy:
+        Attempts: 2
+      Tags:
+        Environment: !Ref Environment
+        Project: BLIMS
+        Component: RNA-Seq-Pipeline
+
+  # 4. Assembly Job (rnaspades + seqhash renaming)
+  AssemblyJobDefinition:
+    Type: AWS::Batch::JobDefinition
+    Properties:
+      JobDefinitionName: !Sub "blims-rna-assembly-${Environment}"
+      Type: container
+      ContainerProperties:
+        Image: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/blims-rna-pipeline:assembly-latest"
+        Command:
+          - "/bin/bash"
+          - "-c"
+          - Ref::command
+        Environment:
+          - Name: INPUT_BUCKET
+            Value: Ref::input_bucket
+          - Name: INPUT_PREFIX
+            Value: Ref::input_prefix
+          - Name: OUTPUT_BUCKET
+            Value: Ref::output_bucket
+          - Name: OUTPUT_PREFIX
+            Value: Ref::output_prefix
+          - Name: MEMORY_LIMIT
+            Value: "58"
+          - Name: THREADS
+            Value: "16"
+        Volumes:
+          - Name: workdir
+            Host:
+              SourcePath: /tmp/blims-workdir
+        MountPoints:
+          - ContainerPath: /data
+            ReadOnly: false
+            SourceVolume: workdir
+        ResourceRequirements:
+          - Type: VCPU
+            Value: "16"
+          - Type: MEMORY
+            Value: "61440"
+        JobRoleArn: !Ref JobRoleArn
+      RetryStrategy:
+        Attempts: 2
+      Tags:
+        Environment: !Ref Environment
+        Project: BLIMS
+        Component: RNA-Seq-Pipeline
+
+  # 5. Annotation Job (transdecoder + eggnog)
+  AnnotationJobDefinition:
+    Type: AWS::Batch::JobDefinition
+    Properties:
+      JobDefinitionName: !Sub "blims-rna-annotation-${Environment}"
+      Type: container
+      ContainerProperties:
+        Image: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/blims-rna-pipeline:annotation-latest"
+        Command:
+          - "/bin/bash"
+          - "-c"
+          - Ref::command
+        Environment:
+          - Name: INPUT_BUCKET
+            Value: Ref::input_bucket
+          - Name: INPUT_PREFIX
+            Value: Ref::input_prefix
+          - Name: OUTPUT_BUCKET
+            Value: Ref::output_bucket
+          - Name: OUTPUT_PREFIX
+            Value: Ref::output_prefix
+          - Name: EGGNOG_DB_BUCKET
+            Value: Ref::eggnog_db_bucket
+          - Name: EGGNOG_DB_PATH
+            Value: Ref::eggnog_db_path
+          - Name: THREADS
+            Value: "8"
+        Volumes:
+          - Name: workdir
+            Host:
+              SourcePath: /tmp/blims-workdir
+          - Name: eggnogdb
+            Host:
+              SourcePath: /tmp/eggnog-db
+        MountPoints:
+          - ContainerPath: /data
+            ReadOnly: false
+            SourceVolume: workdir
+          - ContainerPath: /eggnog-db
+            ReadOnly: true
+            SourceVolume: eggnogdb
+        ResourceRequirements:
+          - Type: VCPU
+            Value: "8"
+          - Type: MEMORY
+            Value: "32768"
+        JobRoleArn: !Ref JobRoleArn
+      RetryStrategy:
+        Attempts: 2
+      Tags:
+        Environment: !Ref Environment
+        Project: BLIMS
+        Component: RNA-Seq-Pipeline
+
+  # 6. Database Update Job (DuckDB processing)
+  DatabaseUpdateJobDefinition:
+    Type: AWS::Batch::JobDefinition
+    Properties:
+      JobDefinitionName: !Sub "blims-rna-db-update-${Environment}"
+      Type: container
+      ContainerProperties:
+        Image: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/blims-rna-pipeline:db-update-latest"
+        Command:
+          - "/bin/bash"
+          - "-c"
+          - Ref::command
+        Environment:
+          - Name: SAMPLE_ID
+            Value: Ref::sample_id
+          - Name: INPUT_BUCKET
+            Value: Ref::input_bucket
+          - Name: INPUT_PREFIX
+            Value: Ref::input_prefix
+          - Name: OUTPUT_BUCKET
+            Value: Ref::output_bucket
+          - Name: DB_BUCKET
+            Value: Ref::db_bucket
+          - Name: DB_PATH
+            Value: Ref::db_path
+          - Name: THREADS
+            Value: "4"
+        Volumes:
+          - Name: workdir
+            Host:
+              SourcePath: /tmp/blims-workdir
+        MountPoints:
+          - ContainerPath: /data
+            ReadOnly: false
+            SourceVolume: workdir
+        ResourceRequirements:
+          - Type: VCPU
+            Value: "4"
+          - Type: MEMORY
+            Value: "8192"
+        JobRoleArn: !Ref JobRoleArn
+      RetryStrategy:
+        Attempts: 2
+      Tags:
+        Environment: !Ref Environment
+        Project: BLIMS
+        Component: RNA-Seq-Pipeline
+
+Outputs:
+  ReadProcessingJobDefinitionArn:
+    Description: ARN of the RNA-Seq Read Processing job definition
+    Value: !Ref ReadProcessingJobDefinition
+    Export:
+      Name: !Sub "${AWS::StackName}-ReadProcessingJobDefinition"
+  
+  NormalizationJobDefinitionArn:
+    Description: ARN of the RNA-Seq Normalization job definition
+    Value: !Ref NormalizationJobDefinition
+    Export:
+      Name: !Sub "${AWS::StackName}-NormalizationJobDefinition"
+  
+  QuantificationJobDefinitionArn:
+    Description: ARN of the RNA-Seq Quantification job definition
+    Value: !Ref QuantificationJobDefinition
+    Export:
+      Name: !Sub "${AWS::StackName}-QuantificationJobDefinition"
+  
+  AssemblyJobDefinitionArn:
+    Description: ARN of the RNA-Seq Assembly job definition
+    Value: !Ref AssemblyJobDefinition
+    Export:
+      Name: !Sub "${AWS::StackName}-AssemblyJobDefinition"
+  
+  AnnotationJobDefinitionArn:
+    Description: ARN of the RNA-Seq Annotation job definition
+    Value: !Ref AnnotationJobDefinition
+    Export:
+      Name: !Sub "${AWS::StackName}-AnnotationJobDefinition"
+  
+  DatabaseUpdateJobDefinitionArn:
+    Description: ARN of the RNA-Seq Database Update job definition
+    Value: !Ref DatabaseUpdateJobDefinition
+    Export:
+      Name: !Sub "${AWS::StackName}-DatabaseUpdateJobDefinition"
