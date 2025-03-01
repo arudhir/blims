@@ -71,6 +71,7 @@ class Sample:
         is_container: bool = False,
         sequencing_data: Optional[List[Dict[str, Any]]] = None,
         analyses: Optional[List[Dict[str, Any]]] = None,
+        genome_ids: Optional[List[Union[UUID, str]]] = None,
     ):
         """Initialize a new Sample.
 
@@ -86,6 +87,9 @@ class Sample:
             sample_id: Human-readable ID (s1, s2, etc.) generated if not provided
             barcode: Optional barcode identifier for the sample
             is_container: Whether this sample is a container
+            sequencing_data: Sequencing data associated with this sample
+            analyses: Analyses performed on this sample
+            genome_ids: IDs of genomes associated with this sample
         """
         self.id = id or uuid4()
         self.sample_id = sample_id or get_next_sample_id()
@@ -103,6 +107,7 @@ class Sample:
         self.is_container = is_container
         self.sequencing_data = sequencing_data or []
         self.analyses = analyses or []
+        self.genome_ids = genome_ids or []
 
     def add_metadata(self, key: str, value: Any) -> None:
         """Add or update metadata for this sample.
@@ -209,6 +214,28 @@ class Sample:
             return self.analyses
         
         return [analysis for analysis in self.analyses if analysis.get('type') == analysis_type]
+        
+    def add_genome(self, genome_id: Union[UUID, str]) -> None:
+        """Associate a genome with this sample.
+        
+        Args:
+            genome_id: The ID of the genome to associate
+        """
+        genome_id_str = str(genome_id)
+        # Convert string to UUID if it's not already a UUID
+        for existing_genome_id in self.genome_ids:
+            if str(existing_genome_id) == genome_id_str:
+                return  # Already exists, no need to add
+                
+        # Add the genome ID (maintain original type)
+        if isinstance(genome_id, UUID):
+            self.genome_ids.append(genome_id)
+        else:
+            try:
+                self.genome_ids.append(UUID(genome_id_str))
+            except ValueError:
+                # If not a valid UUID, just store as string
+                self.genome_ids.append(genome_id_str)
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert this sample to a dictionary for serialization.
@@ -233,4 +260,5 @@ class Sample:
             "is_container": self.is_container,
             "sequencing_data": self.sequencing_data,
             "analyses": self.analyses,
+            "genome_ids": [str(gid) for gid in self.genome_ids],
         }
